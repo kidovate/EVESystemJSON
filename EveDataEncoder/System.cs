@@ -11,6 +11,7 @@ namespace EveDataEncoder
         public string name;
         public int id;
         public bool region = false;
+        public int regionID;
 
         public bool Equals(System other)
         {

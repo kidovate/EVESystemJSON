@@ -61,32 +61,35 @@ namespace EveDataEncoder
 
                 reader.Close();
 
+                Console.WriteLine("Fetching all systems...");
+                List<System> allSystems = new List<System>();
+
+                cmd = new SqlCommand(
+                            String.Format("SELECT {0} FROM {1}", "solarSystemID, solarSystemName, security, regionID",
+                                          "dbo.mapSolarSystems"), Program.conn);
+                reader = cmd.ExecuteReader();
+
+                while(reader.Read())
+                {
+                    allSystems.Add(new System()
+                                       {
+                                           id = ((int)reader["solarSystemID"]),
+                                           name = ((string)reader["solarSystemName"]).Replace("\"", "\\\""),
+                                           security = (double)reader["security"],
+                                           regionID = (int)reader["regionID"]
+                                       });
+                    Console.WriteLine(allSystems[allSystems.Count-1].name);
+                }
+
+                reader.Close();
                 Console.WriteLine("Building tables for "+regions.Count+" regions...");
 
                 foreach (var region in regions)
                 {
-                    List<System> systems = new List<System>();
                     List<Jump> jumps = new List<Jump>();
                     Console.WriteLine("[" + region.name + "] Building systems table...");
 
-                    cmd =
-                        new SqlCommand(
-                            String.Format("SELECT {0} FROM {1} WHERE {2}", "solarSystemID, solarSystemName, security",
-                                          "dbo.mapSolarSystems", "regionID="+region.id), Program.conn);
-                    reader = cmd.ExecuteReader();
-
-                    while (reader.Read())
-                    {
-                        var id = ((int) reader["solarSystemID"]);
-                        var name = ((string) reader["solarSystemName"]).Replace("\"", "\\\"");
-                        var security = (double) reader["security"];
-                        systems.Add(new System()
-                                        {
-                                            id = id,
-                                            name = name,
-                                            security = security
-                                        });
-                    }
+                    List<System> systems = allSystems.Where(e => e.regionID == region.id).ToList();
 
                     Console.WriteLine("Building jumps table...");
 
@@ -106,7 +109,7 @@ namespace EveDataEncoder
                         if (target == systems.Count)
                         {
                             //Add new system for this one
-                            systems.Add(new System(){id=to, name = "Region: "+regions.First(e=>e.id==(int)reader["toRegionID"]).name, security = -1, region = true});
+                            systems.Add(new System(){id=to, name = "Region: "+regions.First(e=>e.id==(int)reader["toRegionID"]).name, security = -1, region = true, regionID = region.id});
                         }
                         jumps.Add(new Jump()
                                            {
@@ -129,11 +132,40 @@ namespace EveDataEncoder
                     Console.WriteLine("Systems: "+systems.Count);
                     Console.WriteLine("Jumps: "+jumps.Count);
 
-                    string json = APIcheck.JSON.JsonEncode(jsondata);
-                    File.WriteAllText("output/"+region.name.Replace(" ", "_")+".json", json);
+                    File.WriteAllText("output/"+region.name.Replace(" ", "_")+".json", APIcheck.JSON.JsonEncode(jsondata));
 
                     reader.Close();
+
                 }
+
+                
+                Console.WriteLine("Generating 'all'...");
+                var alldata = new Hashtable();
+                List<Hashtable> asystems = allSystems.Select(
+                            system =>
+                            new Hashtable() { { "id", system.id }, { "name", system.name }, { "security", system.security } }).
+                            ToList();
+                cmd =
+                        new SqlCommand(
+                            String.Format("SELECT {0} FROM {1}",
+                                          "fromSolarSystemID, toSolarSystemID",
+                                          "dbo.mapSolarSystemJumps"), Program.conn);
+                reader = cmd.ExecuteReader();
+                List<Hashtable> ajumps = new List<Hashtable>();
+                while (reader.Read())
+                {
+                    ajumps.Add(new Hashtable()
+                                   {
+                                       {"source", allSystems.TakeWhile(c => c.id != (int)reader["fromSolarSystemID"]).Count()},
+                                       {"target", allSystems.TakeWhile(c => c.id != (int)reader["toSolarSystemID"]).Count()}
+                                   });
+                }
+                reader.Close();
+                Console.WriteLine(asystems.Count+" systems");
+                Console.WriteLine(ajumps.Count+" jumps");
+                alldata["systems"] = asystems;
+                alldata["jumps"] = ajumps;
+                File.WriteAllText("output/all.json", APIcheck.JSON.JsonEncode(alldata));
             }
             catch (Exception e)
             {
